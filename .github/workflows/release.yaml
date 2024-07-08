@@ -1,0 +1,81 @@
+# This workflow will run tests using node and then publish a package to GitHub Packages when a release is created
+# For more information see: https://docs.github.com/en/actions/publishing-packages/publishing-nodejs-packages
+
+name: Node.js Package
+
+on:
+  push:
+    tags: "v*"
+
+jobs:
+  bump-version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set env
+        run: echo "RELEASE_VERSION=${GITHUB_REF#refs/*/}" >> $GITHUB_ENV
+      - name: Remove 'v' from RELEASE_VERSION
+        run: |
+          echo "Original RELEASE_VERSION: $RELEASE_VERSION"
+          RELEASE_VERSION=$(echo "$RELEASE_VERSION" | sed 's/^v//')
+          echo "RELEASE_VERSION=$RELEASE_VERSION" >> $GITHUB_ENV
+        shell: bash
+      - name: Install SSH Client
+        uses: webfactory/ssh-agent@v0.7.0
+        with:
+          ssh-private-key: ${{ secrets.DEPLOY_KEY }}
+
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          ref: master
+
+      - name: Git user config
+        run: |
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Update version
+        run: npm version $RELEASE_VERSION --no-git-tag-version
+
+      - name: Commit version
+        run: |
+          git add .
+          git commit -m "bump: v$RELEASE_VERSION"
+
+      - name: Push changes
+        uses: ad-m/github-push-action@master
+        with:
+          force: true
+          ssh: true
+          branch: master
+
+  publish-node-package:
+    runs-on: ubuntu-latest
+    needs: bump-version
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          ref: master
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: "18"
+          registry-url: https://npm.pkg.github.com/
+          scope: "@farmako"
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build
+        run: npm run build
+
+      - name: Update version
+        run: npm version $RELEASE_VERSION --no-git-tag-version
+
+      - name: Publish to Github Package Registry
+        run: npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{secrets.GITHUB_TOKEN}}
